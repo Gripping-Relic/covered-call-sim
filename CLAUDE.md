@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **covered call income simulation** tool. It applies a covered call options strategy to a single 100-share stock position over historical price data to answer: how much net premium income would a given parameter set have generated, would shares have been called away (assigned), how often would rolls be required, and was the $1,000 cash reserve ever stressed?
 
-This is an analytical/calibration tool — not a trading system. The full specification is in `covered call simulation requirements.docx`.
+This is an analytical/calibration tool — not a trading system. The full specification is in `docs/covered call simulation requirements.docx`.
 
 ## Implementation Stack
 
