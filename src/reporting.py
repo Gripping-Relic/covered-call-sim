@@ -1,3 +1,5 @@
+from typing import Optional
+
 from .simulation import SimulationResult
 from .pricing import COMMISSION, SLIPPAGE, RISK_FREE_RATE
 
@@ -9,7 +11,7 @@ def _fmt(val: float, prefix: str = "$") -> str:
 def print_contract_log(result: SimulationResult) -> None:
     hdr = (
         f"{'#':>4}  {'Open':10}  {'Close':10}  {'Days':>4}  "
-        f"{'S@Open':>8}  {'Strike':>7}  {'HV20':>6}  "
+        f"{'S@Open':>8}  {'Strike':>7}  {'HV20':>6}  {'Delta':>6}  "
         f"{'Theo':>6}  {'Recv':>6}  {'Reason':<20}  "
         f"{'S@Close':>8}  {'CloseCost':>9}  {'NewPrem':>7}  "
         f"{'NetP&L':>8}  {'Cash':>10}  {'Reserve':>10}  {'HVW':>3}"
@@ -19,7 +21,7 @@ def print_contract_log(result: SimulationResult) -> None:
     for c in result.contracts:
         print(
             f"{c.number:>4}  {c.open_date:10}  {c.close_date:10}  {c.days_held:>4}  "
-            f"{c.stock_price_open:>8.2f}  {c.strike:>7.2f}  {c.hv20_at_open:>6.4f}  "
+            f"{c.stock_price_open:>8.2f}  {c.strike:>7.2f}  {c.hv20_at_open:>6.4f}  {c.delta_at_open:>6.4f}  "
             f"{c.theoretical_premium:>6.2f}  {c.premium_received:>6.2f}  {c.close_reason:<20}  "
             f"{c.stock_price_close:>8.2f}  {c.cost_to_close:>9.2f}  {c.new_premium_received:>7.2f}  "
             f"{c.net_contract_pnl:>8.2f}  {c.running_cash:>10.2f}  {c.reserve_remaining:>10.2f}  "
@@ -33,7 +35,8 @@ def print_summary(
     history_years: int,
     strike_pct_otm: float,
     expiration_days: int,
-    roll_trigger_pct: float,
+    roll_trigger_pct: Optional[float],
+    roll_trigger_delta: Optional[float],
     cash_reserve: float,
 ) -> None:
     contracts = result.contracts
@@ -41,9 +44,6 @@ def print_summary(
         print("No contracts executed.")
         return
 
-    total_days = (
-        (contracts[-1].close_date if result.sim_end == "" else result.sim_end)
-    )
     from datetime import date as _date
     start = _date.fromisoformat(result.sim_start)
     end = _date.fromisoformat(result.sim_end or contracts[-1].close_date)
@@ -81,7 +81,10 @@ def print_summary(
     print(f"  History:           {history_years} years")
     print(f"  Strike % OTM:      {strike_pct_otm:.1f}%")
     print(f"  Expiration:        {expiration_days} calendar days")
-    print(f"  Roll trigger:      {roll_trigger_pct:.1f}% from strike")
+    if roll_trigger_delta is not None:
+        print(f"  Roll trigger:      delta >= {roll_trigger_delta:.2f} (delta mode)")
+    else:
+        print(f"  Roll trigger:      {roll_trigger_pct:.1f}% from strike (price mode)")
     print(f"  Slippage:          {SLIPPAGE * 100:.0f}%")
     print(f"  Commission:        {_fmt(COMMISSION, '$')} per leg")
     print(f"  Risk-free rate:    {RISK_FREE_RATE * 100:.1f}%")

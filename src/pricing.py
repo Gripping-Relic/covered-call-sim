@@ -16,6 +16,14 @@ def black_scholes_call(S: float, K: float, T: float, sigma: float, r: float = RI
     return float(S * norm.cdf(d1) - K * math.exp(-r * T) * norm.cdf(d2))
 
 
+def black_scholes_delta(S: float, K: float, T: float, sigma: float, r: float = RISK_FREE_RATE) -> float:
+    """Black-Scholes delta N(d1) for a European call."""
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 1.0 if S >= K else 0.0
+    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+    return float(norm.cdf(d1))
+
+
 def round_strike(price: float) -> float:
     return round(price * 2) / 2
 

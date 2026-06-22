@@ -4,8 +4,8 @@ import pandas as pd
 
 from .data import hv20
 from .pricing import (
-    black_scholes_call, round_strike, sell_premium, buy_premium,
-    COMMISSION, SHARES_PER_CONTRACT,
+    black_scholes_call, black_scholes_delta, round_strike,
+    sell_premium, buy_premium, COMMISSION, SHARES_PER_CONTRACT,
 )
 
 CLOSE_REASONS = {
@@ -27,6 +27,7 @@ class ContractRecord:
     strike: float
     hv20_at_open: float
     hv20_warning: bool
+    delta_at_open: float
     theoretical_premium: float
     premium_received: float
     close_reason: str
@@ -69,10 +70,11 @@ def run(
     closes: pd.Series,
     strike_pct_otm: float,
     expiration_days: int,
-    roll_trigger_pct: float,
+    roll_trigger_pct: Optional[float],
     cash_reserve: float,
     cost_basis: Optional[float],
     start_idx: int = 0,
+    roll_trigger_delta: Optional[float] = None,
 ) -> SimulationResult:
     result = SimulationResult()
     result.sim_start = closes.index[start_idx].strftime("%Y-%m-%d")
@@ -88,6 +90,7 @@ def run(
     min_reserve = cash_reserve
     contract_num = 0
     open_idx = start_idx
+    use_delta_trigger = roll_trigger_delta is not None
 
     def bs_contract(S, K, T, sigma):
         return black_scholes_call(S, K, T, sigma) * SHARES_PER_CONTRACT
@@ -107,6 +110,7 @@ def run(
 
         strike = round_strike(open_price * (1 + strike_pct_otm / 100))
         T_open = expiration_days / 365
+        delta_open = black_scholes_delta(open_price, strike, T_open, vol)
         theo_open = bs_contract(open_price, strike, T_open, vol)
         prem_recv = sell_premium(theo_open)
         net_open = prem_recv - COMMISSION
@@ -121,28 +125,44 @@ def run(
         close_idx = exp_idx
         cost_to_close = 0.0
         new_prem = 0.0
+        prev_delta = delta_open  # used for gap detection in delta mode
 
         day_idx = open_idx + 1
         while day_idx <= exp_idx:
             day_price = float(closes.iloc[day_idx])
+            remaining = (closes.index[exp_idx] - closes.index[day_idx]).days
+            T_day = max(remaining / 365, 0.0)
 
-            # Gap assignment: jumped past strike without hitting roll trigger first
+            # In delta mode, compute vol and delta for this day upfront
+            if use_delta_trigger:
+                vol_now, _ = hv20(closes, day_idx)
+                delta_today = black_scholes_delta(day_price, strike, T_day, vol_now)
+
+            # Gap assignment: price jumped past strike without trigger firing first
             if day_price > strike:
-                roll_thresh = strike * (1 - roll_trigger_pct / 100)
-                prev_price = float(closes.iloc[day_idx - 1])
-                if prev_price < roll_thresh:
+                if use_delta_trigger:
+                    is_gap = prev_delta < roll_trigger_delta
+                else:
+                    roll_thresh = strike * (1 - roll_trigger_pct / 100)
+                    prev_price = float(closes.iloc[day_idx - 1])
+                    is_gap = prev_price < roll_thresh
+                if is_gap:
                     close_reason = "gap"
                     close_idx = day_idx
                     break
 
             # Roll trigger
-            roll_thresh = strike * (1 - roll_trigger_pct / 100)
-            if day_price >= roll_thresh:
-                remaining = (closes.index[exp_idx] - closes.index[day_idx]).days
-                T_close = max(remaining / 365, 0.0)
-                vol_now, _ = hv20(closes, day_idx)
+            if use_delta_trigger:
+                trigger_fired = delta_today >= roll_trigger_delta
+            else:
+                roll_thresh = strike * (1 - roll_trigger_pct / 100)
+                trigger_fired = day_price >= roll_thresh
 
-                theo_close = bs_contract(day_price, strike, T_close, vol_now)
+            if trigger_fired:
+                if not use_delta_trigger:
+                    vol_now, _ = hv20(closes, day_idx)
+
+                theo_close = bs_contract(day_price, strike, T_day, vol_now)
                 close_cost = buy_premium(theo_close) + COMMISSION
                 cash_balance -= close_cost
 
@@ -183,6 +203,7 @@ def run(
                     strike=strike,
                     hv20_at_open=vol,
                     hv20_warning=hv_warn,
+                    delta_at_open=delta_open,
                     theoretical_premium=theo_open,
                     premium_received=prem_recv,
                     close_reason=CLOSE_REASONS["rolled"],
@@ -196,21 +217,24 @@ def run(
                 ))
                 result.total_premium_income += prem_recv + sell_premium(theo_new)
 
-                # Restart outer loop from roll date with new contract state
+                # Restart outer loop state for the new contract
                 open_idx = day_idx
                 open_price = day_price
                 open_date = closes.index[day_idx].strftime("%Y-%m-%d")
                 vol = vol_now
                 hv_warn = False
                 strike = new_strike
+                delta_open = black_scholes_delta(day_price, new_strike, expiration_days / 365, vol_now)
+                prev_delta = delta_open
                 theo_open = theo_new
                 prem_recv = sell_premium(theo_new)
                 net_open = new_net
                 exp_idx = _expiry_idx(closes, day_idx, expiration_days)
-                # Continue scanning from next day under new contract
                 day_idx += 1
                 continue
 
+            if use_delta_trigger:
+                prev_delta = delta_today
             day_idx += 1
 
         # ── End of daily monitoring ────────────────────────────────────
@@ -231,6 +255,7 @@ def run(
                 strike=strike,
                 hv20_at_open=vol,
                 hv20_warning=hv_warn,
+                delta_at_open=delta_open,
                 theoretical_premium=theo_open,
                 premium_received=prem_recv,
                 close_reason=CLOSE_REASONS["forced"],
@@ -263,6 +288,7 @@ def run(
                 strike=strike,
                 hv20_at_open=vol,
                 hv20_warning=hv_warn,
+                delta_at_open=delta_open,
                 theoretical_premium=theo_open,
                 premium_received=prem_recv,
                 close_reason=CLOSE_REASONS["gap"],
@@ -304,6 +330,7 @@ def run(
             strike=strike,
             hv20_at_open=vol,
             hv20_warning=hv_warn,
+            delta_at_open=delta_open,
             theoretical_premium=theo_open,
             premium_received=prem_recv,
             close_reason=CLOSE_REASONS[close_reason],
