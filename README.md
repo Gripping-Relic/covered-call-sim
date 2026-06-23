@@ -68,13 +68,34 @@ for t in KO MSFT AAPL; do python simulate.py --ticker $t --no-log; done
 
 ## Output
 
-### Per-contract log (omit with `--no-log`)
+### Console
 
-One row per contract showing: contract number, open/close dates, days held, stock price and strike at open, HV20 volatility, BS delta at open (always recorded regardless of trigger mode), theoretical and received premium, close reason, stock price and cost-to-close at close, new premium (if rolled), net P&L, running cash balance, reserve remaining, and an HV20 warning flag.
+The summary report is always printed. The per-contract log is printed unless `--no-log` is given.
 
-### Summary report
+### Files
 
-Always printed after the log:
+After every run two files are written to `output/` (created automatically; contents are gitignored):
+
+| File | Contents |
+|---|---|
+| `<TICKER>_<YYYYMMDD_HHMMSS>_log.csv` | Per-contract log — one row per contract, all fields as columns |
+| `<TICKER>_<YYYYMMDD_HHMMSS>_summary.txt` | Full summary report as plaintext |
+
+The timestamp in each filename is the local time the run completed, so successive runs for the same ticker never overwrite each other.
+
+The paths are printed at the end of every run:
+
+```
+Output written to:
+  output/KO_20260623_103510_log.csv
+  output/KO_20260623_103510_summary.txt
+```
+
+### Per-contract log fields
+
+`number`, `open_date`, `close_date`, `days_held`, `stock_price_open`, `strike`, `hv20_at_open`, `hv20_warning`, `delta_at_open`, `theoretical_premium`, `premium_received`, `close_reason`, `stock_price_close`, `cost_to_close`, `new_premium_received`, `net_contract_pnl`, `running_cash`, `reserve_remaining`, `rolled`
+
+### Summary report sections
 
 - **Parameters** — the full parameter set used for the run
 - **Period coverage** — simulation start/end dates, total calendar days, and why it ended (data exhausted or assignment)
