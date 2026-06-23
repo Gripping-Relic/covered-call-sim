@@ -1,3 +1,5 @@
+import csv
+import sys
 from typing import Optional
 
 from .simulation import SimulationResult
@@ -8,7 +10,7 @@ def _fmt(val: float, prefix: str = "$") -> str:
     return f"{prefix}{val:,.2f}"
 
 
-def print_contract_log(result: SimulationResult) -> None:
+def print_contract_log(result: SimulationResult, file=sys.stdout) -> None:
     hdr = (
         f"{'#':>4}  {'Open':10}  {'Close':10}  {'Days':>4}  "
         f"{'S@Open':>8}  {'Strike':>7}  {'HV20':>6}  {'Delta':>6}  "
@@ -16,8 +18,8 @@ def print_contract_log(result: SimulationResult) -> None:
         f"{'S@Close':>8}  {'CloseCost':>9}  {'NewPrem':>7}  "
         f"{'NetP&L':>8}  {'Cash':>10}  {'Reserve':>10}  {'HVW':>3}"
     )
-    print(hdr)
-    print("-" * len(hdr))
+    print(hdr, file=file)
+    print("-" * len(hdr), file=file)
     for c in result.contracts:
         print(
             f"{c.number:>4}  {c.open_date:10}  {c.close_date:10}  {c.days_held:>4}  "
@@ -25,8 +27,25 @@ def print_contract_log(result: SimulationResult) -> None:
             f"{c.theoretical_premium:>6.2f}  {c.premium_received:>6.2f}  {c.close_reason:<20}  "
             f"{c.stock_price_close:>8.2f}  {c.cost_to_close:>9.2f}  {c.new_premium_received:>7.2f}  "
             f"{c.net_contract_pnl:>8.2f}  {c.running_cash:>10.2f}  {c.reserve_remaining:>10.2f}  "
-            f"{'Y' if c.hv20_warning else 'N':>3}"
+            f"{'Y' if c.hv20_warning else 'N':>3}",
+            file=file,
         )
+
+
+def write_contract_log_csv(result: SimulationResult, path: str) -> None:
+    fields = [
+        "number", "open_date", "close_date", "days_held",
+        "stock_price_open", "strike", "hv20_at_open", "hv20_warning",
+        "delta_at_open", "theoretical_premium", "premium_received",
+        "close_reason", "stock_price_close", "cost_to_close",
+        "new_premium_received", "net_contract_pnl", "running_cash",
+        "reserve_remaining", "rolled",
+    ]
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for c in result.contracts:
+            writer.writerow({field: getattr(c, field) for field in fields})
 
 
 def print_summary(
@@ -38,10 +57,11 @@ def print_summary(
     roll_trigger_pct: Optional[float],
     roll_trigger_delta: Optional[float],
     cash_reserve: float,
+    file=sys.stdout,
 ) -> None:
     contracts = result.contracts
     if not contracts:
-        print("No contracts executed.")
+        print("No contracts executed.", file=file)
         return
 
     from datetime import date as _date
@@ -71,67 +91,69 @@ def print_summary(
     gap_events = [c for c in contracts if c.close_reason == "Gap Assignment"]
     reserve_exhausted = result._min_reserve <= 0
 
-    print()
-    print("=" * 70)
-    print("SIMULATION SUMMARY")
-    print("=" * 70)
+    p = lambda *args, **kwargs: print(*args, file=file, **kwargs)
 
-    print("\n--- Parameters ---")
-    print(f"  Ticker:            {ticker}")
-    print(f"  History:           {history_years} years")
-    print(f"  Strike % OTM:      {strike_pct_otm:.1f}%")
-    print(f"  Expiration:        {expiration_days} calendar days")
+    p()
+    p("=" * 70)
+    p("SIMULATION SUMMARY")
+    p("=" * 70)
+
+    p("\n--- Parameters ---")
+    p(f"  Ticker:            {ticker}")
+    p(f"  History:           {history_years} years")
+    p(f"  Strike % OTM:      {strike_pct_otm:.1f}%")
+    p(f"  Expiration:        {expiration_days} calendar days")
     if roll_trigger_delta is not None:
-        print(f"  Roll trigger:      delta >= {roll_trigger_delta:.2f} (delta mode)")
+        p(f"  Roll trigger:      delta >= {roll_trigger_delta:.2f} (delta mode)")
     else:
-        print(f"  Roll trigger:      {roll_trigger_pct:.1f}% from strike (price mode)")
-    print(f"  Slippage:          {SLIPPAGE * 100:.0f}%")
-    print(f"  Commission:        {_fmt(COMMISSION, '$')} per leg")
-    print(f"  Risk-free rate:    {RISK_FREE_RATE * 100:.1f}%")
-    print(f"  Cash reserve:      {_fmt(cash_reserve)}")
+        p(f"  Roll trigger:      {roll_trigger_pct:.1f}% from strike (price mode)")
+    p(f"  Slippage:          {SLIPPAGE * 100:.0f}%")
+    p(f"  Commission:        {_fmt(COMMISSION, '$')} per leg")
+    p(f"  Risk-free rate:    {RISK_FREE_RATE * 100:.1f}%")
+    p(f"  Cash reserve:      {_fmt(cash_reserve)}")
 
-    print("\n--- Period Coverage ---")
-    print(f"  Start:             {result.sim_start}")
-    print(f"  End:               {result.sim_end}")
-    print(f"  Total days:        {(end - start).days}")
-    print(f"  End reason:        {result.end_reason}")
+    p("\n--- Period Coverage ---")
+    p(f"  Start:             {result.sim_start}")
+    p(f"  End:               {result.sim_end}")
+    p(f"  Total days:        {(end - start).days}")
+    p(f"  End reason:        {result.end_reason}")
 
-    print("\n--- Contract Activity ---")
+    p("\n--- Contract Activity ---")
     expired = [c for c in contracts if c.close_reason == "Expired Worthless"]
-    print(f"  Total contracts:   {len(contracts)}")
-    print(f"  Expired worthless: {len(expired)}")
-    print(f"  Rolled:            {len(rolled_contracts)}")
-    print(f"  Assigned:          {len(assigned_contracts)}")
+    p(f"  Total contracts:   {len(contracts)}")
+    p(f"  Expired worthless: {len(expired)}")
+    p(f"  Rolled:            {len(rolled_contracts)}")
+    p(f"  Assigned:          {len(assigned_contracts)}")
 
-    print("\n--- Income Summary ---")
-    print(f"  Gross premium:     {_fmt(gross_premium)}")
-    print(f"  Total commissions: {_fmt(total_commissions)}")
-    print(f"  Est. slippage:     {_fmt(total_slippage)}")
-    print(f"  Net income:        {_fmt(net_income)}")
-    print(f"  Annualized yield:  {annualized_yield:.2f}%")
+    p("\n--- Income Summary ---")
+    p(f"  Gross premium:     {_fmt(gross_premium)}")
+    p(f"  Total commissions: {_fmt(total_commissions)}")
+    p(f"  Est. slippage:     {_fmt(total_slippage)}")
+    p(f"  Net income:        {_fmt(net_income)}")
+    p(f"  Annualized yield:  {annualized_yield:.2f}%")
     if contracts:
         avg_prem = gross_premium / len(contracts)
         avg_days = sum(c.days_held for c in contracts) / len(contracts)
-        print(f"  Avg premium/contract: {_fmt(avg_prem)}")
-        print(f"  Avg holding period:   {avg_days:.1f} days")
+        p(f"  Avg premium/contract: {_fmt(avg_prem)}")
+        p(f"  Avg holding period:   {avg_days:.1f} days")
 
-    print("\n--- Risk / Stress ---")
-    print(f"  Debit rolls:       {len(debit_rolls)}")
-    print(f"  Largest debit:     {_fmt(largest_debit)}")
-    print(f"  Lowest cash:       {_fmt(result._min_cash)}")
-    print(f"  Lowest reserve:    {_fmt(result._min_reserve)}")
-    print(f"  Reserve exhausted: {'YES' if reserve_exhausted else 'No'}")
-    print(f"  Gap events:        {len(gap_events)}")
+    p("\n--- Risk / Stress ---")
+    p(f"  Debit rolls:       {len(debit_rolls)}")
+    p(f"  Largest debit:     {_fmt(largest_debit)}")
+    p(f"  Lowest cash:       {_fmt(result._min_cash)}")
+    p(f"  Lowest reserve:    {_fmt(result._min_reserve)}")
+    p(f"  Reserve exhausted: {'YES' if reserve_exhausted else 'No'}")
+    p(f"  Gap events:        {len(gap_events)}")
 
     if result.capital_gain_loss is not None:
-        print("\n--- Assignment ---")
-        print(f"  Date:              {result.assignment_date}")
-        print(f"  Stock at assign:   {_fmt(result.assignment_stock_price or 0)}")
-        print(f"  Strike:            {_fmt(result.assignment_strike or 0)}")
-        print(f"  Cost basis:        {_fmt(result.cost_basis)}")
-        print(f"  Capital gain/loss: {_fmt(result.capital_gain_loss)}")
-        print(f"  Premium income:    {_fmt(result.total_premium_income)}")
+        p("\n--- Assignment ---")
+        p(f"  Date:              {result.assignment_date}")
+        p(f"  Stock at assign:   {_fmt(result.assignment_stock_price or 0)}")
+        p(f"  Strike:            {_fmt(result.assignment_strike or 0)}")
+        p(f"  Cost basis:        {_fmt(result.cost_basis)}")
+        p(f"  Capital gain/loss: {_fmt(result.capital_gain_loss)}")
+        p(f"  Premium income:    {_fmt(result.total_premium_income)}")
         combined = result.capital_gain_loss + result.total_premium_income
-        print(f"  Combined outcome:  {_fmt(combined)}")
+        p(f"  Combined outcome:  {_fmt(combined)}")
 
-    print()
+    p()

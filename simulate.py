@@ -23,10 +23,14 @@ Full specification: docs/covered_call_simulation_requirements_v2.docx
 """
 import argparse
 import sys
+from datetime import datetime
+from pathlib import Path
 
 from src.data import fetch_prices
 from src.simulation import run
-from src.reporting import print_contract_log, print_summary
+from src.reporting import print_contract_log, print_summary, write_contract_log_csv
+
+OUTPUT_DIR = Path(__file__).parent / "output"
 
 
 def main() -> None:
@@ -52,7 +56,7 @@ def main() -> None:
     parser.add_argument("--cost-basis", type=float, default=None,
                         help="Actual cost basis per share (optional)")
     parser.add_argument("--no-log", action="store_true",
-                        help="Skip per-contract log, show summary only")
+                        help="Skip per-contract log on stdout, show summary only")
     args = parser.parse_args()
 
     if args.roll_trigger_pct is not None and args.roll_trigger_delta is not None:
@@ -86,11 +90,7 @@ def main() -> None:
         start_idx=sim_start_idx,
     )
 
-    if not args.no_log:
-        print_contract_log(result)
-
-    print_summary(
-        result,
+    summary_kwargs = dict(
         ticker=args.ticker,
         history_years=args.history_years,
         strike_pct_otm=args.strike_pct_otm,
@@ -99,6 +99,27 @@ def main() -> None:
         roll_trigger_delta=roll_trigger_delta,
         cash_reserve=args.cash_reserve,
     )
+
+    # Console output
+    if not args.no_log:
+        print_contract_log(result)
+    print_summary(result, **summary_kwargs)
+
+    # File output
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ticker = args.ticker.upper()
+
+    csv_path = OUTPUT_DIR / f"{ticker}_{ts}_log.csv"
+    write_contract_log_csv(result, str(csv_path))
+
+    summary_path = OUTPUT_DIR / f"{ticker}_{ts}_summary.txt"
+    with open(summary_path, "w") as f:
+        print_summary(result, **summary_kwargs, file=f)
+
+    print(f"\nOutput written to:")
+    print(f"  {csv_path}")
+    print(f"  {summary_path}")
 
 
 if __name__ == "__main__":
