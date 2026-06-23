@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a **covered call income simulation** tool. It applies a covered call options strategy to a single 100-share stock position over historical price data to answer: how much net premium income would a given parameter set have generated, would shares have been called away (assigned), how often would rolls be required, and was the $1,000 cash reserve ever stressed?
 
-This is an analytical/calibration tool — not a trading system. The full specification is in `docs/covered call simulation requirements.docx`.
+This is an analytical/calibration tool — not a trading system. The full specification is in `docs/covered_call_simulation_requirements_v2.docx`.
 
 ## Implementation Stack
 
@@ -23,7 +23,8 @@ This is an analytical/calibration tool — not a trading system. The full specif
 | `history_years` | 10 | Years of historical data to fetch |
 | `strike_pct_otm` | 5.0 | % above stock price at contract open |
 | `expiration_days` | 30 | Calendar days per contract term |
-| `roll_trigger_pct` | 2.0 | Roll fires when price ≥ strike × (1 − pct/100) |
+| `roll_trigger_pct` | 2.0 | Price mode: roll fires when price ≥ strike × (1 − pct/100). Default when neither trigger flag is given. Mutually exclusive with `roll_trigger_delta`. |
+| `roll_trigger_delta` | None | Delta mode: roll fires when BS delta (N(d1)) reaches this value. Combines distance-from-strike with time remaining, so it fires earlier on long-window contracts and later on short ones. Mutually exclusive with `roll_trigger_pct`. |
 | `cash_reserve` | 1000.00 | USD reserve to fund debit rolls |
 | `cost_basis` | None | If omitted, use first adjusted close in dataset |
 
@@ -42,8 +43,10 @@ The simulation is best structured as a pipeline of four concerns:
 2. **Pricing engine** — Black-Scholes call pricer given `(S, K, T, r, sigma)`. Apply slippage at call sites: `× 0.95` when selling, `× 1.05` when buying back.
 
 3. **Simulation loop** — iterates over trading days, managing a single contract at a time:
-   - **Open**: set strike (rounded to $0.50), compute HV20 + BS premium, collect net credit, charge commission.
-   - **Daily monitor**: check roll trigger (`closing_price ≥ strike × (1 − roll_trigger_pct/100)`).
+   - **Open**: set strike (rounded to $0.50), compute HV20, BS delta (always recorded), and BS premium; collect net credit; charge commission.
+   - **Daily monitor**: check roll trigger. Two mutually exclusive modes:
+     - *Price mode* (default): fires when `closing_price ≥ strike × (1 − roll_trigger_pct/100)`.
+     - *Delta mode*: fires when BS delta (N(d1)) reaches `roll_trigger_delta`. Delta accounts for both distance-from-strike and time remaining, so the trigger is earlier on long-window contracts and later on short ones.
    - **Roll**: close existing contract (BS value at current date × 1.05 + commission), open new contract same day with fresh strike and full `expiration_days` term.
    - **Expiration**: if roll never triggered and close < strike → expired worthless (ideal); if close ≥ strike → assignment.
    - **Gap assignment**: if any day's close jumps past the strike without triggering the roll threshold first.
@@ -75,8 +78,11 @@ conda create -n covered-call-sim python=3.11 -y
 conda activate covered-call-sim
 pip install -r requirements.txt
 
-# Run simulation — summary only
+# Run simulation — summary only (price-based roll trigger, default)
 python simulate.py --ticker KO --no-log
+
+# Run with delta-based roll trigger
+python simulate.py --ticker AAPL --roll-trigger-delta 0.40 --no-log
 
 # Run with full per-contract log
 python simulate.py --ticker AAPL --history-years 10 --strike-pct-otm 5 --expiration-days 30 --roll-trigger-pct 2 --cash-reserve 1000
